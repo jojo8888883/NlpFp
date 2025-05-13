@@ -1,0 +1,23 @@
+# Python 缓存
+__pycache__/
+*.pyc
+
+# Jupyter
+*.ipynb_checkpoints
+
+# 数据与实验输出
+train/
+val.npy
+*.jpg
+*.npy
+checkpoints/
+results/
+
+# 环境
+env/
+.venv/
+
+# VSCode 等 IDE
+.vscode/
+.idea/
+
