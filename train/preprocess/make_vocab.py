@@ -3,8 +3,8 @@ import os
 import re
 from collections import defaultdict
 
-src_dir = "VQA_V2"
-saving_dir = "VQA_V2"
+src_dir = "/home/cyz/Data/VQA_V2"
+saving_dir = "/home/cyz/Data/VQA_V2"
 
 top_answer = 30000
 

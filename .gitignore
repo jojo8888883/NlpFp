@@ -5,11 +5,14 @@ __pycache__/
 # Jupyter
 *.ipynb_checkpoints
 
-# 数据与实验输出
-train/
+# 数据与实验输出（不要忽略整个 train/）
 val.npy
 *.jpg
 *.npy
+*.pth
+*.log
+*.txt
+*.csv
 checkpoints/
 results/
 
@@ -20,4 +23,3 @@ env/
 # VSCode 等 IDE
 .vscode/
 .idea/
-

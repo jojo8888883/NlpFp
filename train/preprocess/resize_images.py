@@ -42,7 +42,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--input_dir', type=str, default="~/Data/VQA_V2/Images",
+    parser.add_argument('--input_dir', type=str, default="/home/cyz/Data/VQA_V2/Images",
                         help='directory for input images (unresized images)')
 
     parser.add_argument('--output_dir', type=str, default='../data/resize_image',
