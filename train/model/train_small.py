@@ -3,22 +3,17 @@ import time
 import torch
 import torch.nn as nn
 import argparse
+import random
+import pandas as pd
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
-from torch.optim.swa_utils import AveragedModel, SWALR
+from torch.utils.data import DataLoader, Subset
 from model import VQAModel, FocalLoss
-from build_dataset import get_data_loader
+from build_dataset import VQADataset
+from torchvision import transforms
 
-# 默认目录
-DEFAULT_DIR = {
-    'data_proc': '../data_proc',
-    'ckpt': '../runs',
-    'logs': '../runs',
-}
-
-def train(args):
+def train_small_sample(args):
     """
-    训练VQA模型，支持参数分组、SWA和Focal Loss
+    训练VQA模型的小规模实验版本
     """
     # 创建保存目录
     save_dir = args.save_dir
@@ -31,24 +26,66 @@ def train(args):
         for k, v in vars(args).items():
             f.write(f"{k}: {v}\n")
     
+    # 定义图像转换
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+    ])
+    
     # 加载数据
     print("正在加载数据...")
-    dataloader = get_data_loader(
-        train_csv=args.train_csv,
-        val_csv=args.val_csv,
+    # 加载小规模数据
+    train_df = pd.read_csv(args.train_csv)
+    val_df = pd.read_csv(args.val_csv)
+    
+    # 随机选择一小部分数据
+    train_sample = train_df.sample(n=min(args.sample_size, len(train_df)), random_state=42)
+    val_sample = val_df.sample(n=min(args.sample_size//5, len(val_df)), random_state=42)
+    
+    # 保存采样后的CSV
+    train_sample_path = os.path.join(save_dir, 'train_sample.csv')
+    val_sample_path = os.path.join(save_dir, 'val_sample.csv')
+    train_sample.to_csv(train_sample_path, index=False)
+    val_sample.to_csv(val_sample_path, index=False)
+    
+    # 创建数据集
+    train_dataset = VQADataset(
+        csv_path=train_sample_path,
         question_vocab_path=args.question_vocab,
         answer_vocab_path=args.answer_vocab,
-        batch_size=args.batch_size,
         max_qu_len=args.max_qu_len,
+        transform=transform
+    )
+    
+    val_dataset = VQADataset(
+        csv_path=val_sample_path,
+        question_vocab_path=args.question_vocab,
+        answer_vocab_path=args.answer_vocab,
+        max_qu_len=args.max_qu_len,
+        transform=transform
+    )
+    
+    # 创建数据加载器
+    train_loader = DataLoader(
+        dataset=train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
         num_workers=args.num_workers
     )
     
-    train_loader, val_loader = dataloader['train'], dataloader['val']
-    print(f"训练集大小: {len(train_loader.dataset)}, 验证集大小: {len(val_loader.dataset)}")
+    val_loader = DataLoader(
+        dataset=val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers
+    )
+    
+    print(f"训练集大小: {len(train_dataset)}, 验证集大小: {len(val_dataset)}")
     
     # 获取词汇表大小
-    qu_vocab_size = train_loader.dataset.qu_vocab.vocab_size
-    ans_vocab_size = train_loader.dataset.ans_vocab.vocab_size
+    qu_vocab_size = train_dataset.qu_vocab.vocab_size
+    ans_vocab_size = train_dataset.ans_vocab.vocab_size
     print(f"问题词汇表大小: {qu_vocab_size}, 答案词汇表大小: {ans_vocab_size}")
     
     # 创建模型
@@ -83,15 +120,6 @@ def train(args):
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='min', factor=0.5, patience=2
     )
-    
-    # SWA设置
-    if args.use_swa:
-        swa_model = AveragedModel(model)
-        swa_scheduler = SWALR(
-            optimizer, swa_lr=args.lr/5, anneal_epochs=1, anneal_strategy='linear'
-        )
-        swa_start = args.epochs // 2
-        print(f"将在第{swa_start}个epoch开始使用SWA")
     
     # 训练过程跟踪
     best_val_loss = float('inf')
@@ -129,7 +157,7 @@ def train(args):
             train_correct += predicted.eq(labels).sum().item()
             
             # 进度显示
-            if (batch_idx + 1) % 100 == 0 or (batch_idx + 1) == len(train_loader):
+            if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(train_loader):
                 print(f"Epoch [{epoch+1}/{args.epochs}] Batch [{batch_idx+1}/{len(train_loader)}] "
                       f"Loss: {train_loss/(batch_idx+1):.4f} "
                       f"Acc: {100.*train_correct/train_total:.2f}%")
@@ -167,11 +195,6 @@ def train(args):
         # 更新学习率
         scheduler.step(val_loss)
         
-        # SWA更新
-        if args.use_swa and epoch >= swa_start:
-            swa_model.update_parameters(model)
-            swa_scheduler.step()
-        
         # 记录日志
         print(f"Epoch [{epoch+1}/{args.epochs}] "
               f"Train Loss: {train_loss:.4f} Train Acc: {train_acc:.2f}% "
@@ -207,29 +230,25 @@ def train(args):
             print(f"[!] 验证性能{args.patience}个epoch未提高，早停")
             break
     
-    # 保存SWA模型
-    if args.use_swa and epoch >= swa_start:
-        swa_model_path = os.path.join(save_dir, 'swa_model.pth')
-        torch.save(swa_model.state_dict(), swa_model_path)
-        print(f"SWA模型已保存: {swa_model_path}")
-    
     end_time = time.time()
     training_time = end_time - start_time
     print(f">> 训练完成 | 训练时间:{training_time//60:.0f}分钟{training_time%60:.0f}秒")
     print(f">> 最佳验证准确率: {best_val_acc:.2f}%")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='VQA模型训练')
+    parser = argparse.ArgumentParser(description='VQA模型小规模训练')
     
     # 数据相关参数
-    parser.add_argument('--train_csv', type=str, default='../data_proc/train.csv',
+    parser.add_argument('--train_csv', type=str, default='data_proc/train.csv',
                        help='训练集CSV文件路径')
-    parser.add_argument('--val_csv', type=str, default='../data_proc/val.csv',
+    parser.add_argument('--val_csv', type=str, default='data_proc/val.csv',
                        help='验证集CSV文件路径')
-    parser.add_argument('--question_vocab', type=str, default='../data_proc/question_vocabs.txt',
+    parser.add_argument('--question_vocab', type=str, default='data_proc/question_vocabs.txt',
                        help='问题词汇表路径')
-    parser.add_argument('--answer_vocab', type=str, default='../data_proc/annotation_vocabs.txt',
+    parser.add_argument('--answer_vocab', type=str, default='data_proc/annotation_vocabs.txt',
                        help='答案词汇表路径')
+    parser.add_argument('--sample_size', type=int, default=5000,
+                       help='训练样本数量')
     
     # 模型相关参数
     parser.add_argument('--feature_size', type=int, default=1024,
@@ -244,9 +263,9 @@ if __name__ == '__main__':
                        help='最大问题长度')
     
     # 训练相关参数
-    parser.add_argument('--batch_size', type=int, default=128,
+    parser.add_argument('--batch_size', type=int, default=32,
                        help='批大小')
-    parser.add_argument('--epochs', type=int, default=12,
+    parser.add_argument('--epochs', type=int, default=5,
                        help='训练轮数')
     parser.add_argument('--lr', type=float, default=2e-4,
                        help='学习率')
@@ -254,18 +273,16 @@ if __name__ == '__main__':
                        help='CNN主干学习率')
     parser.add_argument('--focal_loss', action='store_true',
                        help='是否使用Focal Loss')
-    parser.add_argument('--use_swa', action='store_true',
-                       help='是否使用随机权重平均')
-    parser.add_argument('--save_every', type=int, default=2,
+    parser.add_argument('--save_every', type=int, default=1,
                        help='每隔多少个epoch保存一次')
-    parser.add_argument('--num_workers', type=int, default=8,
+    parser.add_argument('--num_workers', type=int, default=4,
                        help='数据加载的工作线程数')
     parser.add_argument('--patience', type=int, default=3,
                        help='早停耐心值')
     
     # 输出目录
-    parser.add_argument('--save_dir', type=str, default='../runs/vgg_ft_bilstm_concat',
+    parser.add_argument('--save_dir', type=str, default='runs/small_experiment',
                        help='模型保存目录')
     
     args = parser.parse_args()
-    train(args)
+    train_small_sample(args) 

@@ -4,9 +4,9 @@ import json
 import glob
 import numpy as np
 
-image_dir = "~/Data/VQA_V2/Images"
-annotation_dir = "~/Data/VQA_V2/Annotations"
-question_dir = "~/Data/VQA_V2/Questions"
+image_dir = "/home/cyz/Data/VQA_V2/resize_image"
+annotation_dir = "/home/cyz/Data/VQA_V2/Annotations"
+question_dir = "/home/cyz/Data/VQA_V2/Questions"
 output_dir = "../data"
 
 def preprocessing(question, annotation_dir, image_dir, labeled):
@@ -63,11 +63,25 @@ def tokenizer(sentence):
     tokens = [w.strip() for w in tokens if len(w.strip()) > 0]
     return tokens
 
-def match_top_ans(annotation_ans):
+# def match_top_ans(annotation_ans):
 
-    annotation_dir = r"preprocess\annotation_vocabs.txt"
+#     annotation_dir = r"preprocess\annotation_vocabs.txt"
+#     if "top_ans" not in match_top_ans.__dict__:
+#         with open(annotation_dir, 'r') as f:
+#             match_top_ans.top_ans = {line.strip() for line in f}
+#     annotation_ans = {ans['answer'] for ans in annotation_ans}
+#     valid_ans = match_top_ans.top_ans & annotation_ans
+
+#     if len(valid_ans) == 0:
+#         valid_ans = ['<unk>']
+#         match_top_ans.unk_ans += 1
+
+#     return annotation_ans, valid_ans
+
+def match_top_ans(annotation_ans):
+    vocab_path = os.path.join(os.path.dirname(__file__), "annotation_vocabs.txt")
     if "top_ans" not in match_top_ans.__dict__:
-        with open(annotation_dir, 'r') as f:
+        with open(vocab_path, 'r') as f:
             match_top_ans.top_ans = {line.strip() for line in f}
     annotation_ans = {ans['answer'] for ans in annotation_ans}
     valid_ans = match_top_ans.top_ans & annotation_ans
@@ -77,6 +91,7 @@ def match_top_ans(annotation_ans):
         match_top_ans.unk_ans += 1
 
     return annotation_ans, valid_ans
+
 
 def main():
 
